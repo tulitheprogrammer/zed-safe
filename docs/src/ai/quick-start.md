@@ -79,14 +79,4 @@ For general settings mechanics, see [Configuring Zed](../configuring-zed.md).
 
 ## Turn AI Off {#turn-ai-off}
 
-Open the Settings Editor with {#action zed::OpenSettings}, search for `Disable AI`, and enable it.
-
-You can also add this to your settings file:
-
-```json [settings]
-{
-  "disable_ai": true
-}
-```
-
-When AI is turned off, all AI features are disabled. This includes the Threads Sidebar, Agent Panel, Edit Prediction, and Inline Assistant.
+AI features are disabled in this build. This includes the Threads Sidebar, Agent Panel, Edit Prediction, and Inline Assistant. The `disable_ai` setting is enforced with saturating semantics, so project or user settings cannot re-enable AI.

@@ -83,7 +83,7 @@ pub struct ProjectSettingsContent {
 
     /// Whether to disable all AI features in Zed.
     ///
-    /// Default: false
+    /// Default: true
     pub disable_ai: Option<SaturatingBool>,
 }
 

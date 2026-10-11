@@ -1710,8 +1710,8 @@
   },
   // Whether to disable all AI features in Zed.
   //
-  // Default: false
-  "disable_ai": false,
+  // Default: true
+  "disable_ai": true,
   // Automatically update Zed. This setting may be ignored on Linux if
   // installed through a package manager.
   "auto_update": true,

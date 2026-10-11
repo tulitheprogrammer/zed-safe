@@ -766,7 +766,7 @@ See [Git documentation](../git.md#diff-view-styles) for more details.
 
 - Description: Whether to disable all AI features in Zed
 - Setting: `disable_ai`
-- Default: `false`
+- Default: `true`
 
 **Options**
 
