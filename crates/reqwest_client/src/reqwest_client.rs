@@ -7,7 +7,7 @@ use gpui_util::defer;
 use anyhow::anyhow;
 use bytes::{BufMut, Bytes, BytesMut};
 use futures::{AsyncRead, FutureExt as _, TryStreamExt as _};
-use http_client::{RedirectPolicy, RequestTimeout, Url, http};
+use http_client::{PinnedDnsResolution, RedirectPolicy, RequestTimeout, Url, http};
 use regex::Regex;
 use reqwest::{
     header::{HeaderMap, HeaderValue},
@@ -117,6 +117,30 @@ impl ReqwestClient {
         client.proxy = client_has_proxy.then_some(proxy).flatten();
         client.user_agent = Some(user_agent);
         Ok(client)
+    }
+
+    fn client_for_pinned_resolution(
+        &self,
+        pinned_resolution: &PinnedDnsResolution,
+    ) -> anyhow::Result<reqwest::Client> {
+        anyhow::ensure!(
+            self.proxy.is_none() && http_client::read_proxy_from_env().is_none(),
+            "requests with pinned DNS resolutions cannot use an HTTP proxy"
+        );
+
+        let mut builder = Self::builder(None)
+            .no_proxy()
+            .resolve_to_addrs(pinned_resolution.host(), pinned_resolution.socket_addrs());
+        if let Some(user_agent) = &self.user_agent {
+            let mut headers = HeaderMap::new();
+            headers.insert(http::header::USER_AGENT, user_agent.clone());
+            builder = builder.default_headers(headers);
+        }
+
+        builder
+            .use_preconfigured_tls(http_client_tls::tls_config())
+            .build()
+            .map_err(Into::into)
     }
 }
 
@@ -274,7 +298,27 @@ impl http_client::HttpClient for ReqwestClient {
     > {
         let (parts, body) = req.into_parts();
 
-        let mut request_builder = self.client.request(parts.method, parts.uri.to_string());
+        let client = if let Some(pinned_resolution) = parts.extensions.get::<PinnedDnsResolution>()
+        {
+            let Some(host) = parts.uri.host() else {
+                return Box::pin(async {
+                    Err(anyhow!("pinned DNS resolution requires a URL with a host"))
+                });
+            };
+            if !host.eq_ignore_ascii_case(pinned_resolution.host()) {
+                return Box::pin(async {
+                    Err(anyhow!("pinned DNS host does not match request URL host"))
+                });
+            }
+            match self.client_for_pinned_resolution(pinned_resolution) {
+                Ok(client) => client,
+                Err(error) => return Box::pin(async move { Err(error) }),
+            }
+        } else {
+            self.client.clone()
+        };
+
+        let mut request_builder = client.request(parts.method, parts.uri.to_string());
         request_builder = request_builder.headers(parts.headers);
         if let Some(redirect_policy) = parts.extensions.get::<RedirectPolicy>() {
             request_builder = request_builder.redirect_policy(match redirect_policy {
@@ -328,10 +372,51 @@ mod tests {
 
     use futures::AsyncReadExt as _;
     use http_client::{
-        AsyncBody, HttpClient, HttpRequestExt as _, Method, Request as HttpRequest, Url,
+        AsyncBody, HttpClient, HttpRequestExt as _, Method, PinnedDnsResolution,
+        Request as HttpRequest, Url,
     };
 
     use crate::ReqwestClient;
+
+    #[test]
+    fn test_pinned_dns_resolution_connects_to_vetted_address() -> anyhow::Result<()> {
+        if http_client::read_proxy_from_env().is_some() {
+            return Ok(());
+        }
+
+        let listener = TcpListener::bind("127.0.0.1:0")?;
+        let address = listener.local_addr()?;
+        let server = std::thread::spawn(move || -> anyhow::Result<()> {
+            let (mut stream, _) = listener.accept()?;
+            let mut reader = BufReader::new(&mut stream);
+            let mut line = String::new();
+            loop {
+                line.clear();
+                anyhow::ensure!(reader.read_line(&mut line)? != 0);
+                if line == "\r\n" {
+                    break;
+                }
+            }
+            drop(reader);
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 0\r\nconnection: close\r\n\r\n")?;
+            Ok(())
+        });
+
+        let client = ReqwestClient::new();
+        let pinned_resolution = PinnedDnsResolution::new("pinned.example", vec![address])?;
+        let request = HttpRequest::builder()
+            .uri("http://pinned.example/")
+            .extension(pinned_resolution)
+            .body(AsyncBody::default())?;
+        let response = futures::executor::block_on(client.send(request))?;
+
+        anyhow::ensure!(response.status().is_success());
+        server
+            .join()
+            .map_err(|_| anyhow::anyhow!("test server thread panicked"))??;
+        Ok(())
+    }
 
     /// Regression test: `StreamReader::poll_next` used to drop the reader it
     /// `take()`s whenever the reader returned `Poll::Pending`, so the next

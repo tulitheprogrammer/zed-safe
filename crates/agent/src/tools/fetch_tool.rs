@@ -7,7 +7,10 @@ use anyhow::{Context as _, Result, bail};
 use futures::{AsyncReadExt as _, FutureExt as _};
 use gpui::{App, AppContext as _, Task};
 use html_to_markdown::{TagHandler, convert_html_to_markdown, markdown};
-use http_client::{AsyncBody, HttpClientWithUrl};
+use http_client::{
+    AsyncBody, HttpClient as _, HttpClientWithUrl, HttpRequestExt as _, PinnedDnsResolution,
+    RedirectPolicy,
+};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use ui::SharedString;
@@ -77,11 +80,23 @@ impl FetchTool {
     /// re-authorize each hop against the shared network grants before following
     /// it. Returns the redirect target when the server responds with a 3xx, or
     /// the final content converted to Markdown otherwise.
-    async fn fetch_step(http_client: Arc<HttpClientWithUrl>, url: &str) -> Result<FetchStep> {
+    async fn fetch_step(
+        http_client: Arc<HttpClientWithUrl>,
+        url: &str,
+        pinned_resolution: Option<PinnedDnsResolution>,
+    ) -> Result<FetchStep> {
         let normalized = normalize_url(url);
+        let parsed_url = url::Url::parse(&normalized)
+            .with_context(|| format!("could not parse URL {normalized:?}"))?;
 
+        let mut request = http_client::Request::builder()
+            .uri(parsed_url.as_str())
+            .follow_redirects(RedirectPolicy::NoFollow);
+        if let Some(pinned_resolution) = pinned_resolution {
+            request = request.extension(pinned_resolution);
+        }
         let mut response = http_client
-            .get(&normalized, AsyncBody::default(), false)
+            .send(request.body(AsyncBody::default())?)
             .await?;
 
         let status = response.status();
@@ -92,8 +107,7 @@ impl FetchTool {
                 .context("redirect response is missing a Location header")?
                 .to_str()
                 .context("redirect response has an invalid Location header")?;
-            let target = url::Url::parse(&normalized)
-                .with_context(|| format!("could not parse URL {normalized:?}"))?
+            let target = parsed_url
                 .join(location)
                 .with_context(|| format!("invalid redirect target {location:?}"))?;
             anyhow::ensure!(
@@ -172,9 +186,7 @@ impl FetchTool {
 /// forbidden addresses") that aborts the fetch.
 ///
 /// DNS resolution blocks, so callers should run this off the foreground thread.
-/// See the caller for why this is a gate rather than a full resolve-to-connect
-/// pin.
-fn verify_host_not_forbidden(url: &str) -> Result<()> {
+fn verify_host_not_forbidden(url: &str) -> Result<http_proxy::PinnedHost> {
     let normalized = normalize_url(url);
     let parsed =
         url::Url::parse(&normalized).with_context(|| format!("could not parse URL {url:?}"))?;
@@ -187,8 +199,7 @@ fn verify_host_not_forbidden(url: &str) -> Result<()> {
         .port_or_known_default()
         .unwrap_or(if parsed.scheme() == "http" { 80 } else { 443 });
 
-    http_proxy::PinnedHost::resolve(host, port).map(|_pinned| ())?;
-    Ok(())
+    http_proxy::PinnedHost::resolve(host, port).map_err(Into::into)
 }
 
 /// Extracts the host from a fetch URL as a [`http_proxy::HostPattern`] so it can
@@ -293,7 +304,7 @@ impl AgentTool for FetchTool {
             let mut current_url = input.url.clone();
             let mut redirects = 0;
             let text = loop {
-                if !unsandboxed {
+                let pinned_resolution = if !unsandboxed {
                     let host = host_pattern_for_url(&current_url).map_err(|e| e.to_string())?;
                     let authorize_host = cx.update(|cx| {
                         let request = SandboxRequest {
@@ -315,31 +326,30 @@ impl AgentTool for FetchTool {
                     // reach the local machine or LAN (SSRF / DNS rebinding).
                     // Resolve and vet the host now, applying the same
                     // forbidden-IP policy the terminal sandbox's proxy enforces.
-                    //
-                    // NOTE: this is a gate, not a full pin. `HttpClientWithUrl`
-                    // resolves the hostname again when it connects, so a DNS
-                    // answer that flips between this check and that connect could
-                    // still slip through. Closing that residual window would
-                    // require the HTTP client to connect to a pre-vetted IP
-                    // (`PinnedHost::socket_addrs`) rather than re-resolving;
-                    // until then this blocks the realistic case of a stably
-                    // resolving host that points at forbidden space.
                     let verify_task = cx.background_spawn({
                         let url = current_url.clone();
                         async move { verify_host_not_forbidden(&url) }
                     });
-                    futures::select! {
+                    let pinned_host = futures::select! {
                         result = verify_task.fuse() => result.map_err(|e| e.to_string())?,
                         _ = event_stream.cancelled_by_user().fuse() => {
                             return Err("Fetch cancelled by user".to_string());
                         }
                     };
-                }
+                    let pinned_resolution = PinnedDnsResolution::new(
+                        pinned_host.untrusted_host_display(),
+                        pinned_host.socket_addrs().collect(),
+                    )
+                    .map_err(|error| error.to_string())?;
+                    Some(pinned_resolution)
+                } else {
+                    None
+                };
 
                 let fetch_task = cx.background_spawn({
                     let http_client = http_client.clone();
                     let url = current_url.clone();
-                    async move { Self::fetch_step(http_client, &url).await }
+                    async move { Self::fetch_step(http_client, &url, pinned_resolution).await }
                 });
 
                 let step = futures::select! {
@@ -375,11 +385,7 @@ impl AgentTool for FetchTool {
 mod tests {
     use super::*;
 
-    // These use IP-literal URLs, which "resolve" to themselves, so the SSRF gate
-    // is exercised without depending on real DNS. IP literals can't be *granted*
-    // network access (that's a separate, earlier check), but they can be the
-    // target a granted hostname redirects to or resolves into — which is exactly
-    // the case this gate defends.
+    // IP literals exercise the forbidden-address policy without relying on DNS.
 
     #[test]
     fn verify_host_rejects_loopback_literal() {

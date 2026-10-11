@@ -14,7 +14,7 @@ use parking_lot::Mutex;
 use serde::Serialize;
 #[cfg(feature = "test-support")]
 use std::{any::type_name, fmt};
-use std::{ops::Deref, sync::Arc, time::Duration};
+use std::{net::SocketAddr, ops::Deref, sync::Arc, time::Duration};
 pub use url::{Host, Url};
 
 #[derive(Default, Debug, Clone, PartialEq, Eq, Hash)]
@@ -28,6 +28,29 @@ pub struct FollowRedirects(pub bool);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RequestTimeout(pub Duration);
+
+#[derive(Clone, Debug)]
+pub struct PinnedDnsResolution {
+    host: String,
+    addrs: Vec<SocketAddr>,
+}
+
+impl PinnedDnsResolution {
+    pub fn new(host: impl Into<String>, addrs: Vec<SocketAddr>) -> Result<Self> {
+        let host = host.into();
+        anyhow::ensure!(!host.is_empty(), "pinned DNS host cannot be empty");
+        anyhow::ensure!(!addrs.is_empty(), "pinned DNS resolution has no addresses");
+        Ok(Self { host, addrs })
+    }
+
+    pub fn host(&self) -> &str {
+        &self.host
+    }
+
+    pub fn socket_addrs(&self) -> &[SocketAddr] {
+        &self.addrs
+    }
+}
 
 pub trait HttpRequestExt {
     /// Conditionally modify self with the given closure.
