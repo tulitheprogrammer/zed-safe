@@ -535,6 +535,11 @@ pub fn initialize_workspace(app_state: Arc<AppState>, cx: &mut App) {
         .detach();
 
         cx.defer(move |cx| {
+            // The threads sidebar depends on agent state that is never initialized when AI is
+            // disabled, and multi-workspace is unavailable in that mode anyway.
+            if DisableAiSettings::get_global(cx).disable_ai {
+                return;
+            }
             window_handle
                 .update(cx, |_, window, cx| {
                     let sidebar =

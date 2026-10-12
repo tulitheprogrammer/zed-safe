@@ -675,6 +675,9 @@ fn main() {
             cx.background_executor().clone(),
         );
         command_palette::init(cx);
+        // Non-AI UI such as the git panel and settings read this registry. Without the
+        // provider registration below, it stays empty and cannot reach any model.
+        language_model::init(cx);
         if !DisableAiSettings::get_global(cx).disable_ai {
             let copilot_chat_configuration = copilot_chat::CopilotChatConfiguration {
                 enterprise_uri: settings::CopilotSettings::get_global(cx)
@@ -690,7 +693,6 @@ fn main() {
             );
 
             copilot_ui::init(&app_state, cx);
-            language_model::init(cx);
             RefreshLlmTokenListener::register(
                 app_state.client.clone(),
                 app_state.user_store.clone(),
