@@ -2605,7 +2605,7 @@
       },
     },
     "TSX": {
-      "language_servers": ["!typescript-language-server", "vtsls", "..."],
+      "language_servers": ["typescript-ls", "!vtsls", "!typescript-language-server", "..."],
       "prettier": {
         "allowed": true,
       },
@@ -2616,7 +2616,7 @@
       },
     },
     "TypeScript": {
-      "language_servers": ["!typescript-language-server", "vtsls", "..."],
+      "language_servers": ["typescript-ls", "!vtsls", "!typescript-language-server", "..."],
       "prettier": {
         "allowed": true,
       },

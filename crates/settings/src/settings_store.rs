@@ -1857,6 +1857,37 @@ mod tests {
     }
 
     #[gpui::test]
+    fn test_default_typescript_language_servers(cx: &mut App) {
+        let store = SettingsStore::new(cx, &default_settings());
+
+        for language in ["TypeScript", "TSX"] {
+            let servers = store
+                .raw_default_settings()
+                .project
+                .all_languages
+                .languages
+                .0[language]
+                .language_servers
+                .as_ref()
+                .expect("TypeScript language servers should be configured by default");
+            let configured_servers = servers
+                .iter()
+                .map(|server| (server.name.as_ref(), server.disabled))
+                .collect::<Vec<_>>();
+
+            assert_eq!(
+                configured_servers,
+                vec![
+                    ("typescript-ls", false),
+                    ("vtsls", true),
+                    ("typescript-language-server", true),
+                    ("...", false),
+                ]
+            );
+        }
+    }
+
+    #[gpui::test]
     fn test_settings_store_basic(cx: &mut App) {
         let mut store = SettingsStore::new(cx, &default_settings());
         store.register_setting::<AutoUpdateSetting>();

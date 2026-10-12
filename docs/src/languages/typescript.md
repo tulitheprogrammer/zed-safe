@@ -8,6 +8,7 @@ description: "Configure TypeScript language support in Zed, including language s
 TypeScript and TSX support are available natively in Zed.
 
 - Tree-sitter: [tree-sitter/tree-sitter-typescript](https://github.com/tree-sitter/tree-sitter-typescript)
+- Language Server: [TypeScript 7 native language server](https://github.com/microsoft/TypeScript), integrated from the [Zed tsgo extension](https://github.com/zed-extensions/tsgo) (Apache-2.0)
 - Language Server: [yioneko/vtsls](https://github.com/yioneko/vtsls)
 - Alternate Language Server: [typescript-language-server/typescript-language-server](https://github.com/typescript-language-server/typescript-language-server)
 - Debug Adapter: [vscode-js-debug](https://github.com/microsoft/vscode-js-debug)
@@ -18,17 +19,18 @@ TBD: Document the difference between Language servers
 
 ## Language servers
 
-By default Zed uses [vtsls](https://github.com/yioneko/vtsls) for TypeScript, TSX, and JavaScript files.
+By default Zed uses the native TypeScript 7 language server for TypeScript and TSX, and [vtsls](https://github.com/yioneko/vtsls) for JavaScript. The native server is installed from npm the first time it starts, so an internet connection or configured npm registry is required then. To pin its version, set `lsp.typescript-ls.settings.package_version` to a TypeScript version `7.0.0` or newer.
+
 Configure language servers in Settings ({#kb zed::OpenSettings}) under Languages > TypeScript/TSX/JavaScript, or add to your settings file:
 
 ```json [settings]
 {
   "languages": {
     "TypeScript": {
-      "language_servers": ["typescript-language-server", "!vtsls", "..."]
+      "language_servers": ["typescript-ls", "!vtsls", "!typescript-language-server", "..."]
     },
     "TSX": {
-      "language_servers": ["typescript-language-server", "!vtsls", "..."]
+      "language_servers": ["typescript-ls", "!vtsls", "!typescript-language-server", "..."]
     },
     "JavaScript": {
       "language_servers": ["typescript-language-server", "!vtsls", "..."]
