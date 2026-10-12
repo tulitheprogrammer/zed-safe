@@ -28,6 +28,7 @@ mod python;
 mod rust;
 mod tailwind;
 mod tailwindcss;
+mod tsgo;
 mod typescript;
 mod vtsls;
 mod yaml;
@@ -85,6 +86,7 @@ pub fn init(languages: Arc<LanguageRegistry>, fs: Arc<dyn Fs>, node: NodeRuntime
         fs.clone(),
     ));
     let vtsls_adapter = Arc::new(vtsls::VtslsLspAdapter::new(node.clone(), fs.clone()));
+    let tsgo_adapter = Arc::new(tsgo::TsGoLspAdapter::new(node.clone()));
     let yaml_lsp_adapter = Arc::new(yaml::YamlLspAdapter::new(node));
 
     let built_in_languages = [
@@ -266,6 +268,8 @@ pub fn init(languages: Arc<LanguageRegistry>, fs: Arc<dyn Fs>, node: NodeRuntime
         eslint_adapter.clone(),
     );
     languages.register_available_lsp_adapter(LanguageServerName("vtsls".into()), vtsls_adapter);
+    languages
+        .register_available_lsp_adapter(LanguageServerName("typescript-ls".into()), tsgo_adapter);
     languages.register_available_lsp_adapter(
         LanguageServerName("typescript-language-server".into()),
         typescript_lsp_adapter,
